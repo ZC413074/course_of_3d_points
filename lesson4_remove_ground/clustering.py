@@ -44,9 +44,8 @@ def plane_fit_ransac(data, param):
 
     # step2 compute the max iterations
     max_iteration = np.longlong(special.comb(size_data, sample_nums))
-    print(max_iteration)
     iterations = np.copy(max_iteration)
-    for _ in np.linspace(0,1,iterations,dtype=np.longlong):
+    for _ in range(iterations):
         # step3 random pick the minimum points of the model
         minimum_model_index = np.random.randint(0, size_data-1, sample_nums)
         point1 = data[minimum_model_index[0]]
@@ -63,21 +62,27 @@ def plane_fit_ransac(data, param):
         #B = plane_normal[1]
         #C = plane_normal[2]
         #D = -plane_normal.dot(point1)
-        distance = abs(plane_normal.dot(data - point1)) / np.linalg.norm(plane_normal)
+        distance = abs((data - point1).dot(plane_normal)) / \
+            np.linalg.norm(plane_normal, axis=0)
     # step6 compute the probability of inner point and update the interations
         inner_index = distance < param['threshold_distance']
         inner_nums = np.sum(inner_index == True)
         inner_probability = inner_nums / size_data
-        if( inner_nums > max_inner_nums):
+        if(inner_nums > max_inner_nums):
             max_inner_nums = inner_nums
-            iterations = np.log(1-inner_probability)/np.log(1-pow(inner_probability,sample_nums))
+            iterations = np.log(1-inner_probability) / \
+                np.log(1-pow(inner_probability, sample_nums))
             A = plane_normal[0]
             B = plane_normal[1]
             C = plane_normal[2]
             D = -plane_normal.dot(point1)
-            plane_coefficients=[A,B,C,D]
-    print("iterations:",iterations)
-    return np.asarray(plane_coefficients)
+            plane_coefficients = [A, B, C, D]
+        if(inner_probability > param['inner_ratio']):
+            break
+    print("iterations:", iterations)
+    if(plane_coefficients[2] < 0):
+        plane_coefficients = - np.asarray(plane_coefficients)
+    return plane_coefficients
 
 
 # 功能：从点云文件中滤除地面点
@@ -85,21 +90,21 @@ def plane_fit_ransac(data, param):
 #     data: 一帧完整点云
 # 输出：
 #     segmengted_cloud: 删除地面点之后的点云
-def ground_segmentation(data):
+def ground_segmentation(data, param):
     # 作业1
     # 屏蔽开始
 
     # step1 plane fit with ransac， and return to its coefficients
-    param = {'minimum points of model': 3,
-             'inner_ratio': .5,
-             'threshold_distance': .5,
-             'max_inner_nums':-1}
     plane_coefficients = plane_fit_ransac(data, param)
 
     # step2 segment the ground points and others
-    one=np.ones(data.shape[0])
-    distance = abs(np.c_[data, one].dot(plane_coefficients)) / np.linalg.norm(plane_coefficients[:3])
-    ground_index = distance < param['threshold_distance']
+    ax_by_cz = data.dot(plane_coefficients[:3])
+    distance = (
+        ax_by_cz + plane_coefficients[3]) / np.linalg.norm(plane_coefficients[:3])
+    #distance = np.c_[data, one].dot(plane_coefficients) / np.linalg.norm(plane_coefficients[:3])
+    ground_index_1 = np.abs(distance) < param['threshold_distance']
+    ground_index_2 = ax_by_cz < - plane_coefficients[3]
+    ground_index = np.logical_or(ground_index_1, ground_index_2)
     segmengted_index = np.logical_not(ground_index)
     segmengted_cloud = data[segmengted_index]
     # 屏蔽结束
@@ -118,6 +123,9 @@ def clustering(data):
     # 作业2
     # 屏蔽开始
     clusters_index = []
+    dbscan_algorithm = cluster.DBSCAN(eps=1.2)
+    dbscan_algorithm.fit(data)
+    clusters_index = dbscan_algorithm.labels_.astype(np.int)
     # 屏蔽结束
 
     return clusters_index
@@ -141,30 +149,37 @@ def plot_clusters(data, cluster_index):
 
 
 def main():
-    root_dir = 'F:\\迅雷下载\\KITTI\\data_object_velodyne\\training\\velodyne'# 数据集路径
+    root_dir = 'F:\\迅雷下载\\KITTI\\data_object_velodyne\\training\\velodyne'  # 数据集路径
     dirs = os.listdir(root_dir)
     print(dirs[0])
-    # print(dirs)
+
+    params = {'threshold_distance': 1.0,
+              'inner_ratio': .8,
+              'max_inner_nums': -1,
+              'minimum points of model': 3
+              }
     for name in dirs:
         filename = os.path.join(root_dir, name)
         print('clustering pointcloud file:', filename)
 
         origin_points = read_velodyne_bin(filename)
-        print(origin_points[0])
+
         point3d_show1 = o3d.geometry.PointCloud()
         point3d_show1.points = o3d.utility.Vector3dVector(origin_points)
         o3d.visualization.draw_geometries([point3d_show1])
 
+        index_up = origin_points[:, 2] < 2.8
+        index_down = origin_points[:, 2] > -3
+        origin_points = origin_points[index_up & index_down]
 
-        segmented_points = ground_segmentation(data=origin_points)
+        segmented_points = ground_segmentation(
+            data=origin_points, param=params)
         point3d_show = o3d.geometry.PointCloud()
         point3d_show.points = o3d.utility.Vector3dVector(segmented_points)
         o3d.visualization.draw_geometries([point3d_show])
 
-        #cluster_index = clustering(segmented_points)
-       # plot_clusters(segmented_points, cluster_index)
-
-
+        cluster_index = clustering(segmented_points)
+        plot_clusters(segmented_points, cluster_index)
 
 
 if __name__ == '__main__':

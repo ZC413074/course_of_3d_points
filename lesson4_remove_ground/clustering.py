@@ -17,8 +17,6 @@ from mpl_toolkits.mplot3d import Axes3D
 #     path: 文件路径
 # 输出：
 #     点云数组
-
-
 def read_velodyne_bin(path):
     '''
     :param path:
@@ -112,13 +110,19 @@ def ground_segmentation(data, param):
     print('segmented data points num:', segmengted_cloud.shape[0])
     return segmengted_cloud
 
+
+
+def mydbscan(data,eps):
+    clusters_index = []
+    return clusters_index
+
+
+
 # 功能：从点云中提取聚类
 # 输入：
 #     data: 点云（滤除地面后的点云）
 # 输出：
 #     clusters_index： 一维数组，存储的是点云中每个点所属的聚类编号（参考上一章内容容易理解）
-
-
 def clustering(data):
     # 作业2
     # 屏蔽开始

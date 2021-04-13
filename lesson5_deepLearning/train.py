@@ -6,7 +6,6 @@ import numpy as np
 import time
 import os
 import datetime
-from torch import autograd
 import torch.nn as nn
 
 from dataset import PointNetDataset
@@ -14,7 +13,7 @@ from model import PointNet
 
 SEED = 13
 batch_size = 8
-epochs = 100
+epochs = 10
 decay_lr_factor = 0.95
 decay_lr_every = 2
 lr = 0.01
@@ -24,7 +23,6 @@ show_every = 1
 val_every = 3
 date = datetime.date.today()
 save_dir = "../output"
-
 
 def save_ckp(ckp_dir, model, optimizer, epoch, best_acc, date):
     os.makedirs(ckp_dir, exist_ok=True)
@@ -49,8 +47,7 @@ def load_ckp(ckp_path, model, optimizer):
 def softXEnt(prediction, real_class):
     # TODO: return loss here
     cross_entropy_loss = nn.CrossEntropyLoss()
-    softmax = np.argmax(real_class,axis = 1 )
-    target = autograd.Variable(torch.LongTensor(softmax))
+    target = torch.argmax(real_class,  axis = 1 )
     loss = cross_entropy_loss(prediction, target)  # 交叉熵
     return loss
 
@@ -76,13 +73,14 @@ def get_eval_acc_results(model, data_loader, device):
             out = model(x)
 
             # TODO: get pred_y from out
-            pred_y = torch.argmax(nn.Softmax(out))
-            gt = np.argmax(y.cpu().numpy(), axis=1)
+            softmax = nn.Softmax(dim = 1)
+            pred_y = torch.argmax(softmax(out), axis = 1)
+            gt = np.argmax(y.cpu().numpy(), axis = 1)
 
             # TODO: calculate acc from pred_y and gt
             acc = np.sum(pred_y == gt)
-            gt_ys = np.append(gt_ys, gt)
-            pred_ys = np.append(pred_ys, pred_y)
+            gt_ys = np.append(gt_ys,gt )
+            pred_ys = np.append(pred_ys, pred_y.numpy())
             idx = gt
 
             accs.append(acc)
@@ -91,17 +89,24 @@ def get_eval_acc_results(model, data_loader, device):
 
 
 if __name__ == "__main__":
+
+    #x = torch.rand(16,40)
+    #y =torch.zeros(16,40)
+    #index = torch.randint(1,40,(16,))
+    #for i in range(16):
+    #    y[i, index[i]]= 1
+    #print(y)
+    #loss = softXEnt(x,y)
+    #print(loss)
+
     writer = SummaryWriter('./output/runs/tersorboard')
     torch.manual_seed(SEED)
-    device = torch.device(
-        f'cuda:{gpus[0]}' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print("Loading train dataset...")
-    train_data = PointNetDataset(
-        "../../modelnet40_normal_resampled", train=0)
+    train_data = PointNetDataset("./../../dataset/modelnet40_normal_resampled", train=0)
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
     print("Loading valid dataset...")
-    val_data = PointNetDataset(
-        "../../modelnet40_normal_resampled/", train=1)
+    val_data = PointNetDataset("./../../dataset/modelnet40_normal_resampled/", train=1)
     val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=True)
     print("Set model and optimizer...")
     model = PointNet().to(device=device)

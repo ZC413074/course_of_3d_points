@@ -97,7 +97,7 @@ class PointNetDataset(Dataset):
       
 
 if __name__ == "__main__":
-  train_data = PointNetDataset("./../../modelnet40_normal_resampled", train=0)
+  train_data = PointNetDataset("./../../dataset/modelnet40_normal_resampled", train=0)
   train_loader = DataLoader(train_data, batch_size=2, shuffle=True)
   cnt = 0
   for pts, label in train_loader:

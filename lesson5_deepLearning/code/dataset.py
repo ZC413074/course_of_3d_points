@@ -27,7 +27,7 @@ def read_file_names_from_file(file):
 
 class PointNetDataset(Dataset):
   def __init__(self, root_dir, train):
-    super(PointNetDataset, self).__init__()
+    super(PointNetDataset, self).__init__()  #继承 PointNetDataset
 
     self._train = train
     self._classes = []
@@ -43,7 +43,7 @@ class PointNetDataset(Dataset):
   def __len__(self):
     return len(self._features)
   
-  def __getitem__(self, idx):
+  def __getitem__(self, idx):   # 根据 __len__ 自动给idx赋值
     feature, label = self._features[idx], self._labels[idx]
     
     # TODO: normalize feature
@@ -97,7 +97,10 @@ class PointNetDataset(Dataset):
       
 
 if __name__ == "__main__":
-  train_data = PointNetDataset("./../../dataset/modelnet40_normal_resampled", train=0)
+  env_dist = os.environ
+  dataset_path = env_dist.get('DATASET_INSTALL_PATH')
+  dataset_path =  dataset_path + "/modelnet40_normal_resampled"
+  train_data = PointNetDataset(dataset_path, train=0)
   train_loader = DataLoader(train_data, batch_size=2, shuffle=True)
   cnt = 0
   for pts, label in train_loader:

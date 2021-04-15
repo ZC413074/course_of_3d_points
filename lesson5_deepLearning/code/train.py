@@ -7,16 +7,17 @@ import time
 import os
 import datetime
 import torch.nn as nn
+import math 
 
 from dataset import PointNetDataset
 from model import PointNet
 
 SEED = 13
 batch_size = 8
-epochs = 100
-decay_lr_factor = 0.95
+epochs = 1000
+decay_lr_factor = 0.95  # 
 decay_lr_every = 2
-lr = 0.01
+lr = 0.001  #0.1太大了  通常在0.0001-0.001，0.001是默认值
 gpus = [0]
 global_step = 0
 show_every = 1
@@ -74,38 +75,50 @@ def get_eval_acc_results(model, data_loader, device):
 
             # TODO: get pred_y from out
             softmax = nn.Softmax(dim = 1)
-            pred_y = torch.argmax(softmax(out), axis = 1).cpu().numpy()
-            gt = np.argmax(y.cpu().numpy(), axis = 1)
+            pred_y = torch.argmax(softmax(out), axis = 1)
+            gt = torch.argmax(y, axis = 1)
 
             # TODO: calculate acc from pred_y and gt
-            acc = np.sum(pred_y == gt)
-            gt_ys = np.append(gt_ys, gt)
-            pred_ys = np.append(pred_ys, pred_y)
+            acc = torch.sum(pred_y == gt)
+            gt_ys.append(gt)
+            pred_ys.append(pred_y)
             idx = gt
 
             accs.append(acc)
 
-        return np.mean(accs)
+        return (sum(accs)/len(data_loader.dataset)).cpu().numpy()
 
 
 if __name__ == "__main__":
+    env_dist = os.environ
+    dataset_path = env_dist.get('DATASET_INSTALL_PATH')
+    dataset_path =  dataset_path + "/modelnet40_normal_resampled"
+
     writer = SummaryWriter('./output/runs/tersorboard')
     torch.manual_seed(SEED)
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
     print("Loading train dataset...")
-    train_data = PointNetDataset("./../../dataset/modelnet40_normal_resampled", train=0)
+    train_data = PointNetDataset(dataset_path, train=0)
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
+    
     print("Loading valid dataset...")
-    val_data = PointNetDataset("./../../dataset/modelnet40_normal_resampled/", train=1)
+    val_data = PointNetDataset(dataset_path, train=1)
     val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=True)
+
     print("Set model and optimizer...")
+
     model = PointNet().to(device=device)
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+
+    optimizer = optim.Adam(model.parameters(), lr=lr)  #lr 为学习率 梯度下降的步长
+    
     scheduler = optim.lr_scheduler.StepLR(
-        optimizer, step_size=decay_lr_every, gamma=decay_lr_factor)
+        optimizer, step_size=decay_lr_every, gamma=decay_lr_factor)  # 损失不下降的时候，调整优化器optimizer
 
     best_acc = 0.0
     model.train()
+
     print("Start trainning...")
     for epoch in range(epochs):
         acc_loss = 0.0
@@ -131,18 +144,15 @@ if __name__ == "__main__":
             acc_loss += batch_size * loss.item()
             num_samples += y.shape[0]
             global_step += 1
-            acc = np.sum(np.argmax(out.cpu().detach().numpy(), axis=1) == np.argmax(
-                y.cpu().detach().numpy(), axis=1)) / len(y)
+            acc = np.sum(np.argmax(out.cpu().detach().numpy(), axis=1) == np.argmax(y.cpu().detach().numpy(), axis=1)) / len(y)
             # print('acc: ', acc)
             if (global_step + 1) % show_every == 0:
                 # ...log the running loss
-                writer.add_scalar('training loss', acc_loss /
-                                  num_samples, global_step)
+                writer.add_scalar('training loss', acc_loss / num_samples, global_step)
                 writer.add_scalar('training acc', acc, global_step)
                 # print( f"loss at epoch {epoch} step {global_step}:{loss.item():3f}, lr:{optimizer.state_dict()['param_groups'][0]['lr']: .6f}, time:{time.time() - start_tic: 4f}sec")
         scheduler.step()
-        print(
-            f"loss at epoch {epoch}:{acc_loss / num_samples:.3f}, lr:{optimizer.state_dict()['param_groups'][0]['lr']: .6f}, time:{time.time() - start_tic: 4f}sec")
+        print(f"loss at epoch {epoch}:{acc_loss / num_samples:.3f}, lr:{optimizer.state_dict()['param_groups'][0]['lr']: .6f}, time:{time.time() - start_tic: 4f}sec")
 
         if (epoch + 1) % val_every == 0:
 

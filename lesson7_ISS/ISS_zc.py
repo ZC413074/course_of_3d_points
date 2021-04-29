@@ -9,8 +9,8 @@ from sklearn.neighbors import KDTree
 
 # matplotlib显示点云函数
 def pointCloudShow(point_cloud,feature_point):
-    fig = plt.figure(dpi=150)
-    ax = fig.add_subplot(111, projection='3d')
+    plt.figure(figsize=(10, 10))
+    ax = plt.axes(projection='3d')
     ax.scatter(point_cloud[:, 0], point_cloud[:, 1], point_cloud[:, 2], cmap='spectral', s=2, linewidths=0, alpha=1, marker=".")
     ax.scatter(feature_point[:, 0], feature_point[:, 1], feature_point[:, 2], cmap='spectral', s=2, linewidths=5, alpha=1,marker=".",color='red')
     plt.title('Point Cloud')
@@ -42,7 +42,7 @@ def iss(data):
     #step1 使用radius NN 得到n个初始关键点, threshold 阈值 ：每个radius内的linda大于某个数值
     nearest_idx = tree.query_radius(data,radius)
     for i in range(len(nearest_idx)):
-        eigvals.append(compute_cov_eigval(data[nearest_idx[i]]))
+        eigvals.append(computeCovEigval(data[nearest_idx[i]]))
     eigvals = np.asarray(eigvals)  # 求解每个点在各自的 radius 范围内的linda
     print(eigvals)     #打印所有的 特征值，供调试用
     # 根据linda3的数值 确定linda3_threshold(linda的阈值)
@@ -82,14 +82,21 @@ def iss(data):
     #output
     return  feature
 
-
-
 if __name__ == '__main__':
-    root_dir = '/home/zc/MyFiles/points/datas/modelnet40_normal_resampled' # 数据集路
-    dirs=os.listdir(root_dir)
-    point_cloud = np.genfromtxt(r"airplane_0001.txt", delimiter=",")
-    point_cloud = point_cloud[:, 0:3]  # 为 xyz的 N*3矩阵
-    feature_idx = iss(point_cloud)
-    feature_point = point_cloud[feature_idx]
-    print(feature_point)
-    Point_Cloud_Show(point_cloud,feature_point)
+    env_dist = os.environ
+    dataset_path = env_dist.get('DATASET_INSTALL_PATH')
+    root_dir =  dataset_path + "/modelnet40_normal_resampled"
+    dirs = os.listdir(root_dir)
+    for path in dirs:
+        filename = os.path.join(root_dir, path, path+'_0001.txt')  # 默认使用第一个点云
+        if not os.path.exists(filename):
+            continue
+        print(filename)
+        # step1 read point_cloud from txt and show(option)
+        point_cloud = np.loadtxt(filename, dtype="float64", delimiter=",")[:, 0:3]
+        print(point_cloud.shape)
+        feature_idx = iss(point_cloud)
+        print("feature_idx", feature_idx)
+        feature_point = point_cloud[feature_idx]
+        print(feature_point)
+        pointCloudShow(point_cloud,feature_point)

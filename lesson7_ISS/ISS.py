@@ -4,110 +4,98 @@ import random
 import matplotlib.pyplot as plt
 
 import open3d as o3d
-from sklearn.neighbors import KDTree
+from sklearn.neighbors import KDTree 
 
 
 # matplotlib显示点云函数
-def Point_Cloud_Show(point_cloud, feature_point):
-    fig = plt.figure(dpi=150)
-    ax = fig.add_subplot(111, projection='3d')
-    ax.scatter(point_cloud[:, 0], point_cloud[:, 1], point_cloud[:, 2],
-               cmap='spectral', s=2, linewidths=0, alpha=1, marker=".")
-    ax.scatter(feature_point[:, 0], feature_point[:, 1], feature_point[:, 2],
-               cmap='spectral', s=2, linewidths=5, alpha=1, marker=".", color='red')
+def pointCloudShow(point_cloud,feature_point):
+    plt.figure(figsize=(15, 15))
+    ax = plt.axes(projection='3d')
+    ax.scatter(point_cloud[:, 0], point_cloud[:, 1], point_cloud[:, 2], cmap='spectral', s=10, linewidths=0, alpha=1, marker=".")
+    ax.scatter(feature_point[:, 0], feature_point[:, 1], feature_point[:, 2], cmap='spectral', s=10, linewidths=5, alpha=1,marker=".",color='red')
     plt.title('Point Cloud')
     ax.set_xlabel('x')
     ax.set_ylabel('y')
     ax.set_zlabel('z')
     plt.show()
 
+def computeCovarianceEigval(nearest_point_cloud, nearest_distance):
+    nearest_distance = np.expand_dims(nearest_distance, axis=1)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        nearest_point_cloud= nearest_point_cloud/(nearest_distance)
+        nearest_point_cloud[~np.isfinite(nearest_point_cloud)] = 0
+    nearest_point_cov = np.cov(nearest_point_cloud.transpose())
+    cov=nearest_point_cov*sum(nearest_distance)
+    eigenvalues,eigenvalues,eigenvaluesT = np.linalg.svd(cov)  
+    eigval_sort_index = eigenvalues.argsort()[::-1] 
+    eigenvalues = eigenvalues[eigval_sort_index]  
+    return  eigenvalues      #返回特征值
 
-def compute_cov_eigval(point_cloud):
-    x = np.asarray(point_cloud[:, 0])
-    y = np.asarray(point_cloud[:, 1])
-    z = np.asarray(point_cloud[:, 2])
-    M = np.vstack((x, y, z))  # 每行表示一个属性， 每列代表一个点
-    cov = np.cov(M)  # 使用每个点的坐标求解cov
-    # 求解三个特征值，升序排列 linda1 < linda2 < linda3
-    eigval, eigvec = np.linalg.eigh(cov)
-    eigval = eigval[np.argsort(-eigval)]  # 改为降序排列  linda1 > linda2 > linda3
-    return eigval  # 返回特征值
+def iss(data, gama21=0.05, gama32=0.7, nms_radius=0.3):
+    #parameters
+    feature_values = []
+    keypoints = []
+    keypoints_index_after_nms = []
 
-
-def iss(data):
-    # parameters
-    eigvals = []
-    feature = []
-    T = set()  # T 关键点的集合
-    linda3_threshold = None  # 阈值，初步筛选 ,各文件参数  airplane_0001:0.001; chair_0001:0.0001
-    # 构建 kd_tree
+    # step1 创建kd树，并以半径r建立近邻搜索，输出每个点的r近邻点的index以及距离
     leaf_size = 4
-    radius = 0.1              # 各文件参数  airplane_00001:0.1; chair_0001:0.1
+    radius = 0.1             
     tree = KDTree(data, leaf_size)
-    # step1 使用radius NN 得到n个初始关键点, threshold 阈值 ：每个radius内的linda大于某个数值
-    nearest_idx = tree.query_radius(data, radius)
-    for i in range(len(nearest_idx)):
-        print(nearest_idx[i].shape)
-    for i in range(len(nearest_idx)):
-        eigvals.append(compute_cov_eigval(data[nearest_idx[i]]))
-    eigvals = np.asarray(eigvals)  # 求解每个点在各自的 radius 范围内的linda
-    print(eigvals)  # 打印所有的 特征值，供调试用
-    # 根据linda3的数值 确定linda3_threshold(linda的阈值)
-    # 阈值取大约 是所有linda3的 中值得5倍，  eg 为什么取5倍是个人调试决定，也可取1倍
-    linda3_threshold = np.median(eigvals, axis=0)[2]*5
-    print(linda3_threshold)
-    for i in range(len(nearest_idx)):
-        # compute_cov_eigval(data[nearest_idx[i]])[2] -> 每个radius 里的最小的特征值 linda3
-        if eigvals[i, 2] > linda3_threshold:
-            T.add(i)  # 获得初始关键点的索引
-    print(T)  # 输出 初始关键点
-    # step2   有 重叠(IOU)的 关键点群
-    unvisited = T  # 未访问集合
-    while len(T):
-        unvisited_old = unvisited  # 更新访问集合
-        core = list(T)[np.random.randint(0, len(T))]  # 从 关键点集T 中随机选取一个 关键点core
-        # 把核心点标记为 visited,从 unvisited 集合中剔除
-        unvisited = unvisited - set([core])
-        visited = []
-        visited.append(core)
+    nearest_index, nearest_distance= tree.query_radius(data, radius, return_distance=True)
 
-        while len(visited):  # 遍历所有初始关键点
-            new_core = visited[0]
-            if new_core in T:
-                # S : 当前 关键点(core) 的范围内所包含的其他关键点
-                S = unvisited & set(nearest_idx[new_core])
-                # print(T)
-                # print(S)
-                visited += (list(S))
-                unvisited = unvisited - S
-            visited.remove(new_core)  # new core 已做检测，去掉new core
-        cluster = unvisited_old - unvisited  # cluster, 有 重叠(IOU)的 关键点群
-        T = T - cluster  # 去掉该类对象里面包含的核心对象,差集
-    # step3  NMS 非极大抑制，求解 一个关键点群的linda3最大 为  关键点
-        cluster_linda3 = []
-        for i in list(cluster):
-            cluster_linda3.append(eigvals[i][2])  # 获取 每个关键点 的 linda3
-        cluster_linda3 = np.asarray(cluster_linda3)
-        NMS_OUTPUT = np.argmax(cluster_linda3)
-        feature.append(list(cluster)[NMS_OUTPUT])  # 添加到 feature 特征点数组中
-    # output
-    return feature
+    # step2 每个点的近邻点并结合其距离的倒数作为权值，计算其协方差矩阵, 并按降序输出其特征值
+    eigvals = []
+    for i in range(len(nearest_index)):
+        eigval = computeCovarianceEigval(data[nearest_index[i]], nearest_distance[i])
+        eigvals.append(eigval)
+    eigvals = np.asarray(eigvals)
 
+    # step3 根据公式判断是否为特征点，三个特征值相差不大为特征点，但是当前的判断条件并不好 todo 20210430
+    gama21 = np.median(eigvals[:,1]/ eigvals[:,0],axis=0)
+    gama32 = np.median(eigvals[:,2]/ eigvals[:,1],axis=0)
+    lamda = np.median(eigvals[:, 2], axis=0)
+    for i in range(eigvals.shape[0]):
+        if(eigvals[i,1]/eigvals[i,0] < gama21 and  eigvals[i,2]/eigvals[i,1] < gama32 and eigvals[i,2] > lamda and eigvals[i,0]>eigvals[i,1]>eigvals[i,2]):  
+        #if( eigvals[i,2] > lamda and eigvals[i,0]> eigvals[i,1] > eigvals[i,2]):
+           # step 3.1 判断为特征点后，将特征值的第三维度添加进feature_values，用于下一步的nms
+            feature_values.append(eigval[2])
+            keypoints.append(data[i])
+    feature_values = np.asarray(feature_values)  
+    keypoints = np.asarray(keypoints) 
+    
+    #step4 NMS, 用关键点，重新建一颗kdtee，然后找出邻域中feature_values最大的为特征点，删掉邻域内的其他伪特征点，重复上述步骤直到访问完所有的keypoints
+    leaf_size = 8
+    # step4.1 建kdtree
+    keypoints_tree = KDTree(keypoints, leaf_size)
+    while keypoints[~np.isnan(keypoints)].shape[0]:
+        # step4.2 找当前feature_values中的最大值，作为最可能的特征点
+        feature_index = np.argmax(feature_values)
+        feature_point = keypoints[feature_index]
+        feature_point = np.expand_dims(feature_point, axis=0)
+        # step4.3 在keypoints查找当前特征点的邻域，并将这些邻域点置为none，以及对应的feature_values值为0
+        nearest_index = keypoints_tree.query_radius(feature_point, nms_radius)
+        keypoints_index_after_nms.append(feature_index)
+        keypoints[feature_index] = np.nan
+        keypoints[nearest_index[0]] = np.nan
+        feature_values[feature_index] = 0
+        feature_values[nearest_index[0]] = 0
+    return  np.asarray(keypoints_index_after_nms)
 
 if __name__ == '__main__':
-    root_dir = 'F:/dataset/modelnet40_normal_resampled'  # 数据集路
+    env_dist = os.environ
+    dataset_path = env_dist.get('DATASET_INSTALL_PATH')
+    root_dir =  dataset_path + "/modelnet40_normal_resampled"
     dirs = os.listdir(root_dir)
-    # print(dirs)
     for path in dirs:
         filename = os.path.join(root_dir, path, path+'_0001.txt')  # 默认使用第一个点云
         if not os.path.exists(filename):
             continue
         print(filename)
         # step1 read point_cloud from txt and show(option)
-        point_cloud = np.loadtxt(
-            filename, dtype="float64", delimiter=",")[:, 0:3]
+        point_cloud = np.loadtxt(filename, dtype="float64", delimiter=",")[:, 0:3]
         print(point_cloud.shape)
         feature_idx = iss(point_cloud)
-        #feature_point = point_cloud[feature_idx]
-        # print(feature_point)
-        # pointCloudShow(point_cloud,feature_point)
+        #print("feature_idx", feature_idx)
+        feature_point = point_cloud[feature_idx]
+        #print(feature_point)
+        pointCloudShow(point_cloud,feature_point)

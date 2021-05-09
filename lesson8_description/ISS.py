@@ -26,7 +26,7 @@ def computeCovarianceEigval(nearest_point_cloud, nearest_distance):
         nearest_point_cloud[~np.isfinite(nearest_point_cloud)] = 0
     nearest_point_cov = np.cov(nearest_point_cloud.transpose())
     cov=nearest_point_cov*sum(nearest_distance)
-    eigenvalues,eigenvalues,eigenvaluesT = np.linalg.svd(cov)  
+    eigenvetors,eigenvalues,eigenvetorsT = np.linalg.svd(cov)  
     eigval_sort_index = eigenvalues.argsort()[::-1] 
     eigenvalues = eigenvalues[eigval_sort_index]  
     return  eigenvalues      #返回特征值

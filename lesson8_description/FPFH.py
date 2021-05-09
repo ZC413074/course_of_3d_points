@@ -5,21 +5,20 @@ import matplotlib.pyplot as plt
 from sklearn.neighbors import KDTree
 from ISS import iss, pointCloudShow
 
-
 def visualFeatureDescription(fpfh, keypoint_idx):
     for i in range(len(fpfh)):
         x = [i for i in range(len(fpfh[i]))]
         y = fpfh[i]
         plt.plot(x, y, label=keypoint_idx[i])
     plt.title('Description Visualization for Keypoints')
-    plt.legend(bbox_to_anchor=(1, 1),  
-               loc="upper right",  
-               ncol=1,  
-               mode="None", 
-               borderaxespad=0, 
-               title="keypoints",  
-               shadow=False,  
-               fancybox=True)  
+    plt.legend(bbox_to_anchor=(1, 1),
+               loc="upper right",
+               ncol=1,
+               mode="None",
+               borderaxespad=0,
+               title="keypoints",
+               shadow=False,
+               fancybox=True)
     plt.xlabel("label")
     plt.ylabel("fpfh")
     plt.show()
@@ -127,6 +126,11 @@ if __name__ == '__main__':
         FPFH = np.asarray([describe(point_cloud, point_cloud_normals, nearest_idx,
                                     keypoint_id, radius, Bin) for keypoint_id in feature_idx])
 
-        # step5 show FPFH 
+        # step5 show FPFH
         visualFeatureDescription(FPFH, feature_idx)
 
+        # step6 test similarity point's FPFH
+        test_keypoint_idx = [1834, 2727, 2818, 8357]
+        test_FPFH = np.asarray([describe(point_cloud, point_cloud_normals, nearest_idx,
+                                         keypoint_id, radius, Bin) for keypoint_id in test_keypoint_idx])
+        visualFeatureDescription(test_FPFH, test_keypoint_idx)

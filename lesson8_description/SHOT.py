@@ -25,9 +25,7 @@ def visualFeatureDescription(fpfh, keypoint_idx):
     plt.show()
 
 
-def computePointLRF(point_cloud, nearest_idx, keypoint_id, radius):   # single pfh
-
-
+def computePointLRF(point_cloud, nearest_idx, keypoint_id, radius):  
     key_nearest_idx = list(set(nearest_idx[keypoint_id]) - set([keypoint_id]))
     key_nearest_idx = np.asarray(key_nearest_idx)
     points = np.asarray(point_cloud)
@@ -65,11 +63,39 @@ def computePointLRF(point_cloud, nearest_idx, keypoint_id, radius):   # single p
     return xyz
 
 
-def descriptorSHOT(point_cloud, point_cloud_normals, nearest_idx, keypoint_id, radius, Bin):   # single pfh
+def descriptorSHOT(point_cloud, point_cloud_normals, nearest_idx, keypoint_id, radius, Bin = 11):
+    key_nearest_idx = list(set(nearest_idx[keypoint_id]) - set([keypoint_id]))
+    key_nearest_idx = np.asarray(key_nearest_idx)
+    normals = np.asarray(point_cloud_normals)
+    # parameters
+    azimuth = 8
+    elevation = 2
+    radial = 2
+
     # step1 计算关键点的LRF with sign disambiguation
     xyz_vector = computePointLRF(point_cloud, nearest_idx, keypoint_id, radius)
+    print(xyz_vector[0])
 
-    # step2 
+    # step2 计算cos theta
+    keypoint_normal = normals[keypoint_id]
+    neighborhood_points_normal = normals[key_nearest_idx]
+    cos_theta = np.dot(neighborhood_points_normal,keypoint_normal)
+    cos_theta[cos_theta<-1.0]=-1.0
+    cos_theta[cos_theta> 1.0]= 1.0
+    cos_theta = (1.0+cos_theta)*Bin/2
+
+    # step3 插值划分区域
+    pi_p = point_cloud[nearest_idx]-keypoint
+    distance = np.linalg.norm(pi_p, axis=1)[:,None]
+    x_in_feat_ref = np.dot(pi_p,xyz_vector[0])
+    y_in_feat_ref = np.dot(pi_p,xyz_vector[1])
+    z_in_feat_ref = np.dot(pi_p,xyz_vector[2])
+    if(np.abs(x_in_feat_ref)<1E-30):
+        x_in_feat_ref=0
+    if(np.abs(y_in_feat_ref)<1E-30):
+        y_in_feat_ref=0
+    if(np.abs(z_in_feat_ref)<1E-30):
+        z_in_feat_ref=0
 
     return []
 
@@ -110,6 +136,6 @@ if __name__ == '__main__':
         SHOT = np.asarray([descriptorSHOT(point_cloud, point_cloud_normals, nearest_idx,
                                     keypoint_id, radius2, Bin) for keypoint_id in feature_idx])
 
-        # step5 show FPFH 
+        # step5 show SHOT 
         visualFeatureDescription(SHOT, feature_idx)
 

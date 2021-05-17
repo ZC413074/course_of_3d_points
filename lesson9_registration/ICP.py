@@ -1,10 +1,14 @@
 import os
 import random
+from re import search
 import struct
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.neighbors import KDTree
+import open3d as o3d
+import time 
 from ISS import iss, pointCloudShow
+
 
 def read_oxford_bin(bin_path):
     '''
@@ -12,12 +16,14 @@ def read_oxford_bin(bin_path):
     :return: [x,y,z,nx,ny,nz]: 6xN
     '''
     data_np = np.fromfile(bin_path, dtype=np.float32)
-    return np.transpose(np.reshape(data_np, (int(data_np.shape[0]/6), 6)))
+    return np.reshape(data_np, (int(data_np.shape[0]/6), 6))
+
 
 def visualFeatureDescription(fpfh, keypoint_idx):
     for i in range(len(fpfh)):
         x = [i for i in range(len(fpfh[i]))]
         y = fpfh[i]
+        plt.plot(x, y, label=keypoint_idx[i])
         plt.plot(x, y, label=keypoint_idx[i])
     plt.title('Description Visualization for Keypoints')
     plt.legend(bbox_to_anchor=(1, 1),
@@ -32,72 +38,28 @@ def visualFeatureDescription(fpfh, keypoint_idx):
     plt.ylabel("fpfh")
     plt.show()
 
+def execute_global_registration(source_down, target_down, source_fpfh,target_fpfh, voxel_size):
 
-def getSpfh(point_cloud, point_cloud_normals, nearest_idx, keypoint_id, radius, Bin):   # single pfh
-
-    points = np.asarray(point_cloud)
-    keypoint = np.asarray(point_cloud)[keypoint_id]
-    key_nearest_idx = list(set(nearest_idx[keypoint_id]) - set([keypoint_id]))
-    key_nearest_idx = np.asarray(key_nearest_idx)
-
-    # step1 计算u v w
-    # step1.1 分别取出关键点与近邻点的法向量，并计算u
-    keypoint_normal = np.asarray(
-        point_cloud_normals[keypoint_id])  # keypoint 邻近点的法向量
-    neighborhood_normal = np.asarray(point_cloud_normals[key_nearest_idx])
-    u = keypoint_normal
-    # step1.2 计算关键点与近邻点的向量，并计算v
-    diff = points[key_nearest_idx] - keypoint
-    diff /= np.linalg.norm(diff, ord=2, axis=1)[:, None]
-    v = np.cross(u, diff)
-    # step1.3 计算W
-    w = np.cross(u, v)
-
-    # step2 计算alpha  phi theta triplets
-    alpha = np.multiply(v, neighborhood_normal).sum(axis=1)
-    phi = np.multiply(u, diff).sum(axis=1)
-    theta = np.arctan2(np.multiply(w, neighborhood_normal).sum(
-        axis=1), (u * neighborhood_normal).sum(axis=1))
-
-    # step3 计算直方图 histogram
-    # step3.1  alpha histogram
-    alpha_histogram = np.histogram(alpha, bins=Bin, range=(-1.0, +1.0))[0]
-    alpha_histogram = alpha_histogram / alpha_histogram.sum()
-    # step3.2  phi histogram
-    phi_histogram = np.histogram(phi, bins=Bin, range=(-1.0, +1.0))[0]
-    phi_histogram = phi_histogram / phi_histogram.sum()
-    # step3.3  theta histogram
-    theta_histogram = np.histogram(theta, bins=Bin, range=(-np.pi, +np.pi))[0]
-    theta_histogram = theta_histogram / theta_histogram.sum()
-    # step3.4  alpha+theta+phi histogram
-    signature = np.hstack((alpha_histogram, phi_histogram, theta_histogram))
-    return signature
-
-
-def icp(point_cloud, point_cloud_normals, nearest_idx, keypoint_id, radius, Bin):   # single pfh
-    # step1 计算关键点的SPFH
-    keypoint_spfh = getSpfh(point_cloud, point_cloud_normals,
-                            nearest_idx, keypoint_id, radius, Bin)
-
-    # step2 计算关键点的RNN的带权重的SPFH
-    # step2.1 计算权重
-    points = np.asarray(point_cloud)
-    keypoint = np.asarray(point_cloud)[keypoint_id]
-    key_nearest_idx = list(set(nearest_idx[keypoint_id]) - set([keypoint_id]))
-    key_nearest_idx = np.asarray(key_nearest_idx)  # np只接受list
-    k = len(key_nearest_idx)
-    W = 1.0 / np.linalg.norm(points[key_nearest_idx] - keypoint, ord=2, axis=1)
-    # step2.2 计算RNN的SPFH
-    neighborhood_spfh = np.asarray([getSpfh(
-        point_cloud, point_cloud_normals, nearest_idx, i, radius, Bin) for i in key_nearest_idx])
-    # step2.3 计算带权重的RNN的SPFH
-    neighborhood_weight_spfh = 1.0 / (k) * np.dot(W, neighborhood_spfh)
-
-    # step3 FPHF
-    fpfh = keypoint_spfh + neighborhood_weight_spfh
-    fpfh = fpfh / np.linalg.norm(fpfh)
-
-    return fpfh
+    o3d.visualization.draw_geometries([source_down])
+    # time.sleep(2)
+    o3d.visualization.draw_geometries([target_down])
+    distance_threshold = voxel_size * 1.5
+    print(":: RANSAC registration on downsampled point clouds.")
+    print("   Since the downsampling voxel size is %.3f," % voxel_size)
+    print("   we use a liberal distance threshold %.3f." % distance_threshold)
+    result = o3d.pipelines.registration.registration_fast_based_on_feature_matching(source_down, target_down, source_fpfh, target_fpfh)
+    # result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
+    #     source_down, target_down, source_fpfh, target_fpfh, True,
+    #     distance_threshold,
+    #     o3d.pipelines.registration.TransformationEstimationPointToPoint(False),
+    #     3, 
+    #     [o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold)], 
+    #     o3d.pipelines.registration.RANSACConvergenceCriteria(100000, 0.999))
+    if (result.transformation.trace() == 4.0):
+        return (False, np.identity(4), np.zeros((6, 6)))
+    information = o3d.pipelines.registration.get_information_matrix_from_point_clouds()
+    print(result.transformation)
+    return result
 
 
 if __name__ == '__main__':
@@ -105,28 +67,79 @@ if __name__ == '__main__':
     env_dist = os.environ
     dataset_path = env_dist.get('DATASET_INSTALL_PATH')
     root_dir = dataset_path + "/shenlan_registration_dataset/registration_dataset"
-    match_pair_txt = os.path.join(root_dir,'reg_result.txt') 
+    match_pair_txt = os.path.join(root_dir, 'reg_result.txt')
     with open(match_pair_txt) as txt:
-        content = txt.readlines() #读全部行
+        content = txt.readlines()  # 读全部行
         txt.close()
     for index, filename in enumerate(content):
-        if(index==0):
+        if(index == 0):
             continue
         filename = filename.split(",")
-        path_filename_pair1 = os.path.join(root_dir, 'point_clouds', filename[0] +'.bin')  # 默认使用第一个点云
-        path_filename_pair2 = os.path.join(root_dir, 'point_clouds', filename[1] +'.bin')  # 默认使用第一个点云
-        print(path_filename_pair1)
-        print(path_filename_pair2)
+        path_filename_pair1 = os.path.join(
+            root_dir, 'point_clouds', filename[0] + '.bin')  # 默认使用第一个点云
+        path_filename_pair2 = os.path.join(
+            root_dir, 'point_clouds', filename[1] + '.bin')  # 默认使用第一个点云
+        # print(path_filename_pair1)
+        # print(path_filename_pair2)
         if not (os.path.exists(path_filename_pair1) and os.path.exists(path_filename_pair2)):
             continue
-        
-        # step1 read point pair  from bin
-        points_pair1 = read_oxford_bin(path_filename_pair1)
-        points_pair2 = read_oxford_bin(path_filename_pair2)
-4
 
-        # point_cloud = points_pair1[:, 0:3]
-        # point_cloud_normals = points_pair2[:, 3:6]
+        # step1 read point pair from bin to point and normals
+        points_source = read_oxford_bin(path_filename_pair1)
+        np.savetxt("data0.txt",points_source)
+        points_target = read_oxford_bin(path_filename_pair2)
+        point_cloud_source = o3d.geometry.PointCloud()
+        point_cloud_source.points = o3d.utility.Vector3dVector(points_source[:, 0:3])
+        point_cloud_source.normals = o3d.utility.Vector3dVector(points_source[:, 3:])
+        point_cloud_target = o3d.geometry.PointCloud()
+        point_cloud_target.points = o3d.utility.Vector3dVector(points_target[:, 0:3])
+        point_cloud_target.normals = o3d.utility.Vector3dVector(points_target[:, 3:])
+        # o3d.visualization.draw_geometries([point_cloud_source, point_cloud_target])
+
+        # step2 downsample
+        points_source_dawnsample = point_cloud_source.voxel_down_sample(voxel_size=0.05)
+        points_target_dawnsample = point_cloud_target.voxel_down_sample(voxel_size=0.05)
+        # np.savetxt("data1.txt", np.asarray(points_source_dawnsample.points))
+        points_source_dawnsample, _= points_source_dawnsample.remove_statistical_outlier(nb_neighbors=40,
+                                                    std_ratio=1.0)
+        points_target_dawnsample, _= points_target_dawnsample.remove_statistical_outlier(nb_neighbors=40,
+                                                    std_ratio=1.0)
+        # o3d.visualization.draw_geometries([points_source_dawnsample])
+        # o3d.visualization.draw_geometries([points_target_dawnsample])
+        # step3 iss 特征提取
+        points_radius = 0.5
+        points_source_iss = o3d.geometry.keypoint.compute_iss_keypoints(points_source_dawnsample,
+                                                                        salient_radius=points_radius,
+                                                                        non_max_radius=points_radius*2,
+                                                                        gamma_21=0.5,
+                                                                        gamma_32=0.5)
+        points_target_iss = o3d.geometry.keypoint.compute_iss_keypoints(points_target_dawnsample,
+                                                                        salient_radius=points_radius,
+                                                                        non_max_radius=points_radius*2,
+                                                                        gamma_21=0.5,
+                                                                        gamma_32=0.5)
+        print('source iss shape:',np.asarray(points_source_iss.points).shape)
+        print('target iss shape:',np.asarray(points_target_iss.points).shape)
+        points_source_iss.paint_uniform_color([1.0, 0, 0.0])
+        points_source_dawnsample.paint_uniform_color([0.5, 0.5, 0.5])
+        points_target_iss.paint_uniform_color([1.0, 0, 0.0])
+        points_target_dawnsample.paint_uniform_color([0.5, 0.5, 0.5])
+        # ,point_show_normal=True)
+        # o3d.visualization.draw_geometries([points_source_iss, points_source_dawnsample])
+        # o3d.visualization.draw_geometries([points_target_iss, points_target_dawnsample])
+
+        # step4 fpfh 特征点描述
+        search_type = o3d.geometry.KDTreeSearchParamRadius(radius=points_radius*4)
+        points_source_fpfh = o3d.pipelines.registration.compute_fpfh_feature(points_source_iss, search_type)
+        keypoint_index = range(points_source_fpfh.data.shape[0])
+        # visualFeatureDescription(points_source_fpfh.data, keypoint_index)
+        points_target_fpfh = o3d.pipelines.registration.compute_fpfh_feature(points_target_iss, search_type)
+        keypoint_index = range(points_target_fpfh.data.shape[0])
+        # visualFeatureDescription(points_target_fpfh.data, keypoint_index)
+
+        # step4 ransac icp
+        result = execute_global_registration(points_source_dawnsample, points_target_dawnsample, points_source_fpfh, points_target_fpfh, points_radius*4)
+        print(result)
 
         # # step2 detect keypoints from point clouds：ISS
         # print(point_cloud.shape)

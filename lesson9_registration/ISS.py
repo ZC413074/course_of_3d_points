@@ -31,21 +31,22 @@ def computeCovarianceEigval(nearest_point_cloud, nearest_distance):
     eigenvalues = eigenvalues[eigval_sort_index]  
     return  eigenvalues      #返回特征值
 
-def iss(data, gama21=0.5, gama32=0.5, nms_radius=0.3):
+def iss(data, gama21=0.5, gama32=0.5, radius=0.1, nms_radius=0.3):
     #parameters
     feature_values = []
     keypoints = []
     keypoints_index_after_nms = []
 
     # step1 创建kd树，并以半径r建立近邻搜索，输出每个点的r近邻点的index以及距离
-    leaf_size = 4
-    radius = 0.1             
+    leaf_size = 4          
     tree = KDTree(data, leaf_size)
     nearest_index, nearest_distance= tree.query_radius(data, radius, return_distance=True)
 
     # step2 每个点的近邻点并结合其距离的倒数作为权值，计算其协方差矩阵, 并按降序输出其特征值
     eigvals = []
     for i in range(len(nearest_index)):
+        if(len(nearest_index[i])<5):
+            continue
         eigval = computeCovarianceEigval(data[nearest_index[i]], nearest_distance[i])
         eigvals.append(eigval)
     eigvals = np.asarray(eigvals)

@@ -41,18 +41,26 @@ def visualFeatureDescription(fpfh, keypoint_idx):
     plt.ylabel("fpfh")
     plt.show()
 
-def evalute_icp(source, target, source_normal, target_normal, voxel_size, initial_transformation):
-    transformation = compute_transformation(source, target)
-    R, t = transformation[0:3, 0:3], transformation[0:3, 3][:, None]
-    R_initial, t_initial = initial_transformation[0:3, 0:3], initial_transformation[0:3, 3][:, None]
-    if(np.sum(abs(R-R_initial))>1 and np.sum(abs(t-t_initial))>1):
-        return None
-    source_to_target = np.dot(R,source.T).T
-    with np.errstate(divide='ignore', invalid='ignore'):
-        E= np.sum(np.linalg.norm(target, source_to_target, axis=1), axis=0)/source.shape[0]
-        E[~np.isfinite(E)] = 0
-    if(E>10):
-        return None
+def evalute_icp(source, target, target_search_tree, voxel_size, initial_transformation, pre_E=-1.0, max_iterator=1000):
+    pre_transformation=initial_transformation
+    for _ in range(max_iterator):
+        _, query_index = target_search_tree.query(source, k=1)
+        pre_R, pre_t = pre_transformation[0:3, 0:3], pre_transformation[0:3, 3][:, None]
+        transformation = compute_transformation(source, target[query_index[:,0],:])
+        R, t = transformation[0:3, 0:3], transformation[0:3, 3][:, None]
+        # if(np.sum(abs(R-pre_R))<1e-5 and np.sum(abs(t-pre_t))<1e-5):
+        #     transformation[0:3,0:3] = np.dot(R, pre_R)
+        #     transformation[0:3,3] = (np.dot(R, pre_t) + t)[:,0]
+        #     transformation[3,3] = 1.0
+        #     break
+        source = np.dot(R,source.T).T
+        E= np.sum(np.linalg.norm(target[query_index[:,0],:] - source, axis=1))/source.shape[0]
+        if(abs(E-pre_E)<1e-5):
+            transformation[0:3,0:3] = np.dot(R, pre_R)
+            transformation[0:3,3] = (np.dot(R, pre_t) + t)[:,0]
+            transformation[3,3] = 1.0
+            break
+        pre_transformation=transformation
     return  transformation
 
 def compute_transformation(source, target):
@@ -126,15 +134,14 @@ def icp_feature(source_down, target_down,source_normal,target_normal, source_fea
     transformation = compute_initial_pose_based_feature(source_down, target_down,source_normal,target_normal, source_feature_index, target_feature_index, source_fpfh, target_fpfh, voxel_size)
 
     # step2 icp
-    transformation = evalute_icp(source_down, target_down,source_normal,target_normal,voxel_size,transformation)
+    leaf_size = 4
+    target_search_tree = KDTree(target_down, leaf_size)
+    transformation = evalute_icp(source_down, target_down, target_search_tree, voxel_size,transformation)
     print(transformation)
     return transformation
 
 
 if __name__ == '__main__':
-
-    a=np.asarray([[1,2,3],[4,5,6]])
-    print("a",np.sum(a))
 
     env_dist = os.environ
     dataset_path = env_dist.get('DATASET_INSTALL_PATH')

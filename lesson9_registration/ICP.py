@@ -42,6 +42,8 @@ def visualFeatureDescription(fpfh, keypoint_idx):
     plt.show()
 
 def evalute_icp(source, target, target_search_tree, voxel_size, initial_transformation, pre_E=-1.0, max_iterator=1000):
+    ini_R, ini_t = initial_transformation[0:3, 0:3], initial_transformation[0:3, 3][:, None]
+    source = (np.dot(ini_R,source.T)+ ini_t).T
     pre_transformation=initial_transformation
     for _ in range(max_iterator):
         _, query_index = target_search_tree.query(source, k=1)
@@ -53,14 +55,16 @@ def evalute_icp(source, target, target_search_tree, voxel_size, initial_transfor
         #     transformation[0:3,3] = (np.dot(R, pre_t) + t)[:,0]
         #     transformation[3,3] = 1.0
         #     break
-        source = np.dot(R,source.T).T
+        source = (np.dot(R,source.T) + t).T
         E= np.sum(np.linalg.norm(target[query_index[:,0],:] - source, axis=1))/source.shape[0]
         if(abs(E-pre_E)<1e-5):
             transformation[0:3,0:3] = np.dot(R, pre_R)
             transformation[0:3,3] = (np.dot(R, pre_t) + t)[:,0]
             transformation[3,3] = 1.0
             break
-        pre_transformation=transformation
+        pre_transformation[0:3,0:3] = np.dot(R, pre_R)
+        pre_transformation[0:3,3] = (np.dot(R, pre_t) + t)[:,0]
+        pre_transformation[3,3] = 1.0
     return  transformation
 
 def compute_transformation(source, target):
@@ -222,4 +226,6 @@ if __name__ == '__main__':
 
         # step6 icp
         transformation = icp_feature(points_source_dawnsample_numpy, points_target_dawnsample_numpy, points_source_dawnsample_numpy_normal,points_target_dawnsample_numpy_normal, points_source_iss, points_target_iss, points_source_fpfh, points_target_fpfh, original_voxel_size*2)
-        o3d.visualization.draw_geometries([point_cloud_target, point_cloud_source.transform(transformation)])
+        R, t = transformation[0:3, 0:3], transformation[0:3, 3][:, None]
+        point_cloud_source.points = (np.dot(R, point_cloud_source.points)+ t).T
+        o3d.visualization.draw_geometries([point_cloud_target, point_cloud_source])

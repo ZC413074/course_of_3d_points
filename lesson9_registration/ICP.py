@@ -41,30 +41,33 @@ def visualFeatureDescription(fpfh, keypoint_idx):
     plt.ylabel("fpfh")
     plt.show()
 
-def evalute_icp(source, target, target_search_tree, voxel_size, initial_transformation, pre_E=-1.0, max_iterator=1000):
+def evalute_icp(source, target, target_search_tree, voxel_size, initial_transformation, pre_E=-1.0, max_iterator=10000):
     ini_R, ini_t = initial_transformation[0:3, 0:3], initial_transformation[0:3, 3][:, None]
     source = (np.dot(ini_R,source.T)+ ini_t).T
     pre_transformation=initial_transformation
-    for _ in range(max_iterator):
+    for i in range(max_iterator):
         _, query_index = target_search_tree.query(source, k=1)
         pre_R, pre_t = pre_transformation[0:3, 0:3], pre_transformation[0:3, 3][:, None]
         transformation = compute_transformation(source, target[query_index[:,0],:])
         R, t = transformation[0:3, 0:3], transformation[0:3, 3][:, None]
-        # if(np.sum(abs(R-pre_R))<1e-5 and np.sum(abs(t-pre_t))<1e-5):
-        #     transformation[0:3,0:3] = np.dot(R, pre_R)
-        #     transformation[0:3,3] = (np.dot(R, pre_t) + t)[:,0]
-        #     transformation[3,3] = 1.0
-        #     break
-        source = (np.dot(R,source.T) + t).T
-        E= np.sum(np.linalg.norm(target[query_index[:,0],:] - source, axis=1))/source.shape[0]
-        if(abs(E-pre_E)<1e-5):
+        if(np.sum(abs(R-pre_R))<1e-5 and np.sum(abs(t-pre_t))<1e-5):
             transformation[0:3,0:3] = np.dot(R, pre_R)
             transformation[0:3,3] = (np.dot(R, pre_t) + t)[:,0]
             transformation[3,3] = 1.0
             break
+        source = (np.dot(R,source.T) + t).T
+        E= np.sum(np.linalg.norm(target[query_index[:,0],:] - source, axis=1))/source.shape[0]
+        if(abs(E-pre_E)<1e-5 and E < voxel_size*4):
+            transformation[0:3,0:3] = np.dot(R, pre_R)
+            transformation[0:3,3] = (np.dot(R, pre_t) + t)[:,0]
+            transformation[3,3] = 1.0
+            break
+        pre_E = E.copy()
         pre_transformation[0:3,0:3] = np.dot(R, pre_R)
         pre_transformation[0:3,3] = (np.dot(R, pre_t) + t)[:,0]
         pre_transformation[3,3] = 1.0
+    if(abs(E-pre_E) >= 1e-5):
+        return None   
     return  transformation
 
 def compute_transformation(source, target):
@@ -73,8 +76,11 @@ def compute_transformation(source, target):
     mean_q = np.mean(target, axis=0)
     p = source - mean_p
     q = target - mean_q
-    u,sigma,v_t=np.linalg.svd(np.dot(q.T, p))
+    u,sigma,v_t=np.linalg.svd(np.dot(p.T, q))
     r = np.dot(u, v_t)
+    if(np.linalg.det(r)<0):      
+        u[:,-1] = -u[:,-1]
+        r = np.dot(u, v_t)
     t = mean_q.T - np.dot(r, mean_p.T)
     transformation[0:3,0:3] = r
     transformation[0:3,3] = t
@@ -91,15 +97,15 @@ def iter_match(source, target, source_normal, target_normal, source_feature_inde
     normals_source = np.asarray(source_normal)[source_feature_index[source_index],:]
     normals_target = np.asarray(target_normal)[target_feature_index[target_index],:]
     normal_cos_distances = (normals_source*normals_target).sum(axis = 1)
-    is_valid_normal_match = np.all(normal_cos_distances >= np.cos(90))
-    if not is_valid_normal_match:
-        return None
+    # is_valid_normal_match = np.all(normal_cos_distances >= np.cos(90))
+    # if not is_valid_normal_match:
+    #     return None
 
     transformation = compute_transformation(points_source, points_target)
     #deviation：偏差  区分 inline outline 通过 距离判断
     R, t = transformation[0:3, 0:3], transformation[0:3, 3][:, None]
     deviation = np.linalg.norm(points_target.T - np.dot(R, points_source.T) - t, axis = 0)
-    print("max deviation:",np.max(deviation, axis=0))
+    #print("max deviation:",np.max(deviation, axis=0))
     is_valid_correspondence_distance = np.all(deviation <= voxel_size*4)
     return transformation if is_valid_correspondence_distance else None
 
@@ -121,12 +127,13 @@ def compute_initial_pose_based_feature(source, target, source_normal, target_nor
     idx_matches = np.arange(N)
     variables_generator = (pairs[np.random.choice(idx_matches, 4, replace=False)] for _ in iter(int, 1))
 
+    # step3 compute the initial transformation
     validator = lambda variables: iter_match(source, target,  source_normal, target_normal, source_feature_index, target_feature_index, variables, voxel_size)
     i=0
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         for transformation in map(validator, variables_generator):
             i=i+1
-            print(i,"th:",":",transformation)
+            #print(i,"th:",":",transformation)
             if not (transformation is None):
                 break
     
@@ -135,7 +142,7 @@ def compute_initial_pose_based_feature(source, target, source_normal, target_nor
 def icp_feature(source_down, target_down,source_normal,target_normal, source_feature_index, target_feature_index, source_fpfh, target_fpfh, voxel_size):
 
     # step1 compute initial pose based on feature
-    transformation = compute_initial_pose_based_feature(source_down, target_down,source_normal,target_normal, source_feature_index, target_feature_index, source_fpfh, target_fpfh, voxel_size)
+    transformation = compute_initial_pose_based_feature(source_down, target_down, source_normal, target_normal, source_feature_index, target_feature_index, source_fpfh, target_fpfh, voxel_size)
 
     # step2 icp
     leaf_size = 4
@@ -167,23 +174,24 @@ if __name__ == '__main__':
 
         # step1 read point pair from bin to point and normals
         points_source = read_oxford_bin(path_filename_pair1)
-        #np.savetxt("data0.txt",points_source)
+        np.savetxt("data0.txt",points_source)
         points_target = read_oxford_bin(path_filename_pair2)
-        #np.savetxt("data1.txt",points_target)
+        np.savetxt("data1.txt",points_target)
         point_cloud_source = o3d.geometry.PointCloud()
         point_cloud_source.points = o3d.utility.Vector3dVector(points_source[:, 0:3])
         point_cloud_source.normals = o3d.utility.Vector3dVector(points_source[:, 3:])
         point_cloud_target = o3d.geometry.PointCloud()
         point_cloud_target.points = o3d.utility.Vector3dVector(points_target[:, 0:3])
         point_cloud_target.normals = o3d.utility.Vector3dVector(points_target[:, 3:])
+        o3d.visualization.draw_geometries([point_cloud_target, point_cloud_source])
         # o3d.visualization.draw_geometries([point_cloud_source])
         # o3d.visualization.draw_geometries([point_cloud_target])
 
         # step2 downsample
         original_voxel_size = 0.2
-        points_source_dawnsample, _= point_cloud_source.remove_statistical_outlier(nb_neighbors=40,
+        points_source_dawnsample, _= point_cloud_source.remove_statistical_outlier(nb_neighbors=80,
                                                     std_ratio=1.0)
-        points_target_dawnsample, _= point_cloud_target.remove_statistical_outlier(nb_neighbors=40,
+        points_target_dawnsample, _= point_cloud_target.remove_statistical_outlier(nb_neighbors=80,
                                                     std_ratio=1.0)
         #np.savetxt("data3.txt",np.asarray(points_source_dawnsample.points))
         #np.savetxt("data4.txt",np.asarray(points_target_dawnsample.points))
@@ -194,18 +202,19 @@ if __name__ == '__main__':
         # o3d.visualization.draw_geometries([points_source_dawnsample])
         # o3d.visualization.draw_geometries([points_target_dawnsample])
 
+        
 
         # step3 iss 特征提取
         points_source_dawnsample_numpy = np.asarray(points_source_dawnsample.points)
         points_source_dawnsample_numpy_normal = np.asarray(points_source_dawnsample.normals)
         points_target_dawnsample_numpy = np.asarray(points_target_dawnsample.points)
         points_target_dawnsample_numpy_normal  = np.asarray(points_target_dawnsample.normals)
-        points_source_iss = iss(data=points_source_dawnsample_numpy, radius=original_voxel_size*3, nms_radius = original_voxel_size*12)
-        points_target_iss = iss(data=points_target_dawnsample_numpy, radius=original_voxel_size*3, nms_radius = original_voxel_size*12)
+        points_source_iss = iss(data=points_source_dawnsample_numpy, radius=original_voxel_size*2.5, nms_radius = original_voxel_size*10)
+        points_target_iss = iss(data=points_target_dawnsample_numpy, radius=original_voxel_size*2.5, nms_radius = original_voxel_size*10)
         print('source iss shape:',points_source_iss.shape)
         print('target iss shape:',points_target_iss.shape)
-        pointCloudShow(points_source_dawnsample_numpy,points_source_dawnsample_numpy[points_source_iss])
-        pointCloudShow(points_target_dawnsample_numpy,points_target_dawnsample_numpy[points_target_iss])
+        #pointCloudShow(points_source_dawnsample_numpy,points_source_dawnsample_numpy[points_source_iss])
+        #pointCloudShow(points_target_dawnsample_numpy,points_target_dawnsample_numpy[points_target_iss])
 
         # step4  build kdtree and compute RNN
         leaf_size = 4
@@ -221,11 +230,13 @@ if __name__ == '__main__':
                                     keypoint_id, radius, Bin) for keypoint_id in points_source_iss])
         points_target_fpfh = np.asarray([describe(points_target_dawnsample_numpy, points_target_dawnsample_numpy_normal, target_nearest_idx,
                                     keypoint_id, radius, Bin) for keypoint_id in points_target_iss])
-        visualFeatureDescription(points_source_fpfh, points_source_iss)
-        visualFeatureDescription(points_target_fpfh, points_target_iss)
+        #visualFeatureDescription(points_source_fpfh, points_source_iss)
+        #visualFeatureDescription(points_target_fpfh, points_target_iss)
 
         # step6 icp
         transformation = icp_feature(points_source_dawnsample_numpy, points_target_dawnsample_numpy, points_source_dawnsample_numpy_normal,points_target_dawnsample_numpy_normal, points_source_iss, points_target_iss, points_source_fpfh, points_target_fpfh, original_voxel_size*2)
-        R, t = transformation[0:3, 0:3], transformation[0:3, 3][:, None]
-        point_cloud_source.points = (np.dot(R, point_cloud_source.points)+ t).T
+        point_cloud_source.transform(transformation)
+        print("final transformation:",transformation)
+        #R, t = transformation[0:3, 0:3], transformation[0:3, 3][:, None]
+        #point_cloud_source.points = (np.dot(R, point_cloud_source.points)+ t).T
         o3d.visualization.draw_geometries([point_cloud_target, point_cloud_source])

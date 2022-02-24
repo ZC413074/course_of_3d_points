@@ -57,7 +57,7 @@ def evalute_icp(source, target, target_search_tree, voxel_size, initial_transfor
             break
         source = (np.dot(R,source.T) + t).T
         E= np.sum(np.linalg.norm(target[query_index[:,0],:] - source, axis=1))/source.shape[0]
-        if(abs(E-pre_E)<1e-5 and E < voxel_size*4):
+        if(abs(E-pre_E)<0.1*pre_E and E < voxel_size*4):
             transformation[0:3,0:3] = np.dot(R, pre_R)
             transformation[0:3,3] = (np.dot(R, pre_t) + t)[:,0]
             transformation[3,3] = 1.0
@@ -66,7 +66,7 @@ def evalute_icp(source, target, target_search_tree, voxel_size, initial_transfor
         pre_transformation[0:3,0:3] = np.dot(R, pre_R)
         pre_transformation[0:3,3] = (np.dot(R, pre_t) + t)[:,0]
         pre_transformation[3,3] = 1.0
-    if(abs(E-pre_E) >= 1e-5):
+    if(E >= voxel_size*4):
         return None   
     return  transformation
 
@@ -80,7 +80,7 @@ def compute_transformation(source, target):
     r = np.dot(u, v_t)
     if(np.linalg.det(r)<0):      
         u[:,-1] = -u[:,-1]
-        r = np.dot(u, v_t)
+        r = np.dot(v_t, u)
     t = mean_q.T - np.dot(r, mean_p.T)
     transformation[0:3,0:3] = r
     transformation[0:3,3] = t
@@ -102,7 +102,7 @@ def iter_match(source, target, source_normal, target_normal, source_feature_inde
     #     return None
 
     transformation = compute_transformation(points_source, points_target)
-    #deviation：偏差  区分 inline outline 通过 距离判断
+    #deviation：inline outline
     R, t = transformation[0:3, 0:3], transformation[0:3, 3][:, None]
     deviation = np.linalg.norm(points_target.T - np.dot(R, points_source.T) - t, axis = 0)
     #print("max deviation:",np.max(deviation, axis=0))
@@ -166,17 +166,17 @@ if __name__ == '__main__':
             continue
         filename = filename.split(",")
         path_filename_pair1 = os.path.join(
-            root_dir, 'point_clouds', filename[0] + '.bin')  # 默认使用第一个点云
+            root_dir, 'point_clouds', filename[0] + '.bin')  
         path_filename_pair2 = os.path.join(
-            root_dir, 'point_clouds', filename[1] + '.bin')  # 默认使用第一个点云
+            root_dir, 'point_clouds', filename[1] + '.bin')  
         if not (os.path.exists(path_filename_pair1) and os.path.exists(path_filename_pair2)):
             continue
 
         # step1 read point pair from bin to point and normals
         points_source = read_oxford_bin(path_filename_pair1)
-        np.savetxt("data0.txt",points_source)
+        #np.savetxt("data0.txt",points_source)
         points_target = read_oxford_bin(path_filename_pair2)
-        np.savetxt("data1.txt",points_target)
+        #np.savetxt("data1.txt",points_target)
         point_cloud_source = o3d.geometry.PointCloud()
         point_cloud_source.points = o3d.utility.Vector3dVector(points_source[:, 0:3])
         point_cloud_source.normals = o3d.utility.Vector3dVector(points_source[:, 3:])
@@ -209,8 +209,8 @@ if __name__ == '__main__':
         points_source_dawnsample_numpy_normal = np.asarray(points_source_dawnsample.normals)
         points_target_dawnsample_numpy = np.asarray(points_target_dawnsample.points)
         points_target_dawnsample_numpy_normal  = np.asarray(points_target_dawnsample.normals)
-        points_source_iss = iss(data=points_source_dawnsample_numpy, radius=original_voxel_size*2.5, nms_radius = original_voxel_size*10)
-        points_target_iss = iss(data=points_target_dawnsample_numpy, radius=original_voxel_size*2.5, nms_radius = original_voxel_size*10)
+        points_source_iss = iss(data=points_source_dawnsample_numpy, radius=original_voxel_size*4, nms_radius = original_voxel_size*10)
+        points_target_iss = iss(data=points_target_dawnsample_numpy, radius=original_voxel_size*4, nms_radius = original_voxel_size*10)
         print('source iss shape:',points_source_iss.shape)
         print('target iss shape:',points_target_iss.shape)
         #pointCloudShow(points_source_dawnsample_numpy,points_source_dawnsample_numpy[points_source_iss])
